@@ -543,11 +543,12 @@
       <h2 style="font-size: 18px;">🎒 Daily Quests</h2>
       <button class="btn btn-secondary" onclick="closeQuestsModal()">✕</button>
     </div>
-    <div id="modalQuestsList" style="display:none !important;"></div>
+    <div id="modalQuestsList"></div>
   </div>
 </div>
 
 <script>
+
 /* ==========================================================================
    Course Data & Flashcard Definitions
    ========================================================================== */
@@ -31898,7 +31899,9 @@ function togglePomodoro() {
       if (pomoTime <= 0) {
         clearInterval(pomoTimerInterval);
         pomoTimerInterval = null;
-        alert("Pomodoro Focus Session Complete! Take a 5-minute break.");
+        document.getElementById("pomoToggleBtn").innerText = "Start";
+        awardXP(25);
+        showToast("Pomodoro complete! +25 XP — take a short break.");
         resetPomodoro();
       }
     }, 1000);
@@ -32109,9 +32112,20 @@ function proceedToQuizFromLesson() {
 
 function renderQuizStage() {
   const session = appState.currentSession;
+  if (!session || !session.topic || !session.topic.qs || !session.topic.qs.length) {
+    showToast("No questions available for this topic.");
+    navigateToDashboard();
+    return;
+  }
+  if (session.qIndex >= session.topic.qs.length) {
+    finishQuizSession();
+    return;
+  }
   const currentQ = session.topic.qs[session.qIndex];
+  const total = session.topic.qs.length;
+  const num = session.qIndex + 1;
 
-  document.getElementById("quizTopicTitle").innerText = session.topic.name;
+  document.getElementById("quizTopicTitle").innerText = `${session.topic.name} · Question ${num}/${total}`;
   document.getElementById("questionText").innerText = currentQ.q;
   document.getElementById("quizFeedbackArea").innerHTML = "";
 
@@ -32123,26 +32137,61 @@ function renderQuizStage() {
     btn.className = "option-btn";
     btn.innerText = opt;
     btn.onclick = () => {
-      if (opt === currentQ.ans) {
+      container.querySelectorAll("button").forEach(b => b.disabled = true);
+      const correct = opt === currentQ.ans;
+      if (correct) {
         btn.classList.add("correct");
         appState.answered++;
         appState.correct++;
-        appState.topicStatuses[session.topic.id] = "mastered";
+        session.score = (session.score || 0) + 1;
         awardXP(25);
       } else {
         btn.classList.add("wrong");
         appState.answered++;
-        appState.topicStatuses[session.topic.id] = "learning";
         awardXP(5);
-        const feedback=document.getElementById("quizFeedbackArea");
-        feedback.innerHTML=`<div class="ai-panel"><b>🤖 StudyQuest Tutor</b><div class="text-muted" style="margin-top:8px">The correct answer is <strong>${currentQ.ans}</strong>. Review the lesson, then try another question.</div></div>`;
+        container.querySelectorAll("button").forEach(b => {
+          if (b.innerText === currentQ.ans) b.classList.add("correct");
+        });
+        const feedback = document.getElementById("quizFeedbackArea");
+        feedback.innerHTML = `<div class="ai-panel"><b>💡 Correct answer</b><div class="text-muted" style="margin-top:8px"><strong>${currentQ.ans}</strong></div></div>`;
+      }
+      // Topic status: mastered only if finishing with good score later
+      if (!appState.topicStatuses[session.topic.id] || appState.topicStatuses[session.topic.id] === "not-started") {
+        appState.topicStatuses[session.topic.id] = "learning";
       }
       saveState();
       updateUIStats();
-      setTimeout(() => navigateToDashboard(), 1600);
+      const nextBtn = document.createElement("button");
+      nextBtn.className = "btn btn-primary";
+      nextBtn.style.marginTop = "12px";
+      nextBtn.innerText = session.qIndex < total - 1 ? "Next question →" : "See results →";
+      nextBtn.onclick = () => {
+        session.qIndex++;
+        renderQuizStage();
+      };
+      document.getElementById("quizFeedbackArea").appendChild(nextBtn);
     };
     container.appendChild(btn);
   });
+}
+
+function finishQuizSession() {
+  const session = appState.currentSession;
+  const total = session.topic.qs.length;
+  const score = session.score || 0;
+  const pct = total ? Math.round((score / total) * 100) : 0;
+  if (pct >= 80) appState.topicStatuses[session.topic.id] = "mastered";
+  else appState.topicStatuses[session.topic.id] = "learning";
+  saveState();
+  updateUIStats();
+  document.getElementById("quizTopicTitle").innerText = "Session complete";
+  document.getElementById("questionText").innerText = `Score: ${score}/${total} (${pct}%)`;
+  document.getElementById("questionOptionsContainer").innerHTML = "";
+  document.getElementById("quizFeedbackArea").innerHTML = `
+    <button class="btn btn-primary" onclick="navigateToDashboard()">Back to dashboard</button>
+    <button class="btn btn-secondary" style="margin-left:8px" onclick="session.qIndex=0;session.score=0;renderQuizStage()">Retry</button>
+  `;
+  showToast(pct >= 80 ? "🎉 Topic looking strong!" : "Keep practising — you can improve this.");
 }
 
 function handleGlobalSearch(query) {
@@ -32164,10 +32213,10 @@ function handleGlobalSearch(query) {
   dropdown.classList.remove("hidden");
 }
 
-function openMasteryMatrixModal() { document.getElementById("masteryMatrixModal").classList.remove("hidden"); }
-function closeMasteryMatrixModal() { document.getElementById("masteryMatrixModal").classList.add("hidden"); }
-function openQuestsModal() { document.getElementById("questsModal").classList.remove("hidden"); }
-function closeQuestsModal() { document.getElementById("questsModal").classList.add("hidden"); }
+
+
+
+
 function openExamSetupView() {
   hideAllViews();
   document.getElementById("examSetupView").classList.remove("hidden");
@@ -32196,55 +32245,7 @@ window.addEventListener("beforeunload", saveState);
 document.addEventListener("keydown", e=>{
   if(e.key==="Escape") document.querySelectorAll(".modal-backdrop").forEach(m=>m.classList.add("hidden"));
 });
-</script>
 
-<!-- Upgrade Modals -->
-<div id="profileModal" class="modal-backdrop hidden">
-  <div class="modal-card">
-    <div style="display:flex;justify-content:space-between;align-items:center"><h2>👤 StudyQuest Profile</h2><button class="btn btn-secondary" onclick="closeModal('profileModal')">✕</button></div>
-    <div class="stats-grid">
-      <div class="stat-big"><span class="text-muted">XP</span><b id="profileXp">0</b></div>
-      <div class="stat-big"><span class="text-muted">Level</span><b id="profileLevel">1</b></div>
-      <div class="stat-big"><span class="text-muted">Streak</span><b id="profileStreak">1</b></div>
-    </div>
-    <p class="text-muted">This single-file version saves locally in your browser. Real accounts and cloud sync require a backend.</p>
-  </div>
-</div>
-
-<div id="adminModal" class="modal-backdrop hidden">
-  <div class="modal-card">
-    <div style="display:flex;justify-content:space-between;align-items:center"><h2>🛠️ Admin Dashboard</h2><button class="btn btn-secondary" onclick="closeModal('adminModal')">✕</button></div>
-    <div class="stats-grid">
-      <div class="stat-big"><span class="text-muted">Subjects</span><b id="adminSubjects">0</b></div>
-      <div class="stat-big"><span class="text-muted">Topics</span><b id="adminTopics">0</b></div>
-      <div class="stat-big"><span class="text-muted">Questions</span><b id="adminQuestions">0</b></div>
-    </div>
-    <p class="text-muted">Admin authentication, multi-user analytics and question editing need a secure server/database in a production build.</p>
-  </div>
-</div>
-
-<div id="premiumModal" class="modal-backdrop hidden">
-  <div class="modal-card">
-    <div style="display:flex;justify-content:space-between;align-items:center"><h2>💎 StudyQuest Plus</h2><button class="btn btn-secondary" onclick="closeModal('premiumModal')">✕</button></div>
-    <div class="feature-grid">
-      <div class="feature-card"><h3>Free</h3><p class="text-muted">Core lessons, flashcards and quizzes.</p></div>
-      <div class="feature-card"><h3>Plus</h3><p class="text-muted">AI-generated quizzes, advanced analytics and extra practice.</p><button class="btn btn-primary" style="margin-top:12px" onclick="showToast('Payment system is not connected in this prototype.')">Choose Plus</button></div>
-    </div>
-  </div>
-</div>
-
-<div id="aiGeneratorModal" class="modal-backdrop hidden">
-  <div class="modal-card">
-    <div style="display:flex;justify-content:space-between;align-items:center"><h2>🤖 AI Quiz Generator</h2><button class="btn btn-secondary" onclick="closeModal('aiGeneratorModal')">✕</button></div>
-    <p class="text-muted" style="margin:10px 0 16px">Describe the quiz you want. If no AI key is configured, StudyQuest creates a local practice set from the curriculum.</p>
-    <input id="aiGeneratorInput" class="search-input" placeholder="10 hard questions on algebra">
-    <button class="btn btn-primary" style="margin-top:12px;width:100%" onclick="generateQuiz()">Generate</button>
-    <div id="aiGeneratorOutput" class="text-muted" style="margin-top:14px"></div>
-  </div>
-</div>
-
-</body>
-</html
 function awardXP(amount){
   const oldLevel = appState.level;
   appState.xp += amount;
@@ -32365,4 +32366,53 @@ function generateQuiz(){
   showToast(`🤖 Generated 10-question quiz: ${chosen.topic.name}`);
 }
 
->
+</script>
+
+<!-- Upgrade Modals -->
+<div id="profileModal" class="modal-backdrop hidden">
+  <div class="modal-card">
+    <div style="display:flex;justify-content:space-between;align-items:center"><h2>👤 StudyQuest Profile</h2><button class="btn btn-secondary" onclick="closeModal('profileModal')">✕</button></div>
+    <div class="stats-grid">
+      <div class="stat-big"><span class="text-muted">XP</span><b id="profileXp">0</b></div>
+      <div class="stat-big"><span class="text-muted">Level</span><b id="profileLevel">1</b></div>
+      <div class="stat-big"><span class="text-muted">Streak</span><b id="profileStreak">1</b></div>
+    </div>
+    <p class="text-muted">This single-file version saves locally in your browser. Real accounts and cloud sync require a backend.</p>
+  </div>
+</div>
+
+<div id="adminModal" class="modal-backdrop hidden">
+  <div class="modal-card">
+    <div style="display:flex;justify-content:space-between;align-items:center"><h2>🛠️ Admin Dashboard</h2><button class="btn btn-secondary" onclick="closeModal('adminModal')">✕</button></div>
+    <div class="stats-grid">
+      <div class="stat-big"><span class="text-muted">Subjects</span><b id="adminSubjects">0</b></div>
+      <div class="stat-big"><span class="text-muted">Topics</span><b id="adminTopics">0</b></div>
+      <div class="stat-big"><span class="text-muted">Questions</span><b id="adminQuestions">0</b></div>
+    </div>
+    <p class="text-muted">Admin authentication, multi-user analytics and question editing need a secure server/database in a production build.</p>
+  </div>
+</div>
+
+<div id="premiumModal" class="modal-backdrop hidden">
+  <div class="modal-card">
+    <div style="display:flex;justify-content:space-between;align-items:center"><h2>💎 StudyQuest Plus</h2><button class="btn btn-secondary" onclick="closeModal('premiumModal')">✕</button></div>
+    <div class="feature-grid">
+      <div class="feature-card"><h3>Free</h3><p class="text-muted">Core lessons, flashcards and quizzes.</p></div>
+      <div class="feature-card"><h3>Plus</h3><p class="text-muted">AI-generated quizzes, advanced analytics and extra practice.</p><button class="btn btn-primary" style="margin-top:12px" onclick="showToast('Payment system is not connected in this prototype.')">Choose Plus</button></div>
+    </div>
+  </div>
+</div>
+
+<div id="aiGeneratorModal" class="modal-backdrop hidden">
+  <div class="modal-card">
+    <div style="display:flex;justify-content:space-between;align-items:center"><h2>🤖 AI Quiz Generator</h2><button class="btn btn-secondary" onclick="closeModal('aiGeneratorModal')">✕</button></div>
+    <p class="text-muted" style="margin:10px 0 16px">Describe the quiz you want. If no AI key is configured, StudyQuest creates a local practice set from the curriculum.</p>
+    <input id="aiGeneratorInput" class="search-input" placeholder="10 hard questions on algebra">
+    <button class="btn btn-primary" style="margin-top:12px;width:100%" onclick="generateQuiz()">Generate</button>
+    <div id="aiGeneratorOutput" class="text-muted" style="margin-top:14px"></div>
+  </div>
+</div>
+
+
+</body>
+</html>
